@@ -1,0 +1,14 @@
+model_name: "Vehicle Type Detection v4"
+version: "4.0"
+classes:
+  - Bus
+  - CAR
+  - Motorcycle
+  - SUV
+  - Standard Car
+  - Truck
+  - Van
+number_of_classes: 7
+native_format: "PyTorch (.pt)"
+source_training_directory: "Vehicle_type_detection/runs/Vehicle_type_detection_v4"
+description: "High-quality vehicle sub-category classification model based on Kaggle ground-truth crops."

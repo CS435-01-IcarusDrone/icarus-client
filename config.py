@@ -1,0 +1,48 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+
+CONFIG_JSON_PATH = Path(__file__).with_name("config.json")
+DEFAULT_CONFIG = {
+    "CLIENT_USERNAME": "pi",
+    "CLIENT_IP": "127.0.0.1",
+    "IMAGE_QUALITY": 95,
+    "IMAGE_DIRECTORY": "images",
+    "IMAGE_CAPTURE_GPIO_PIN": 17,
+    "PI_API_BASE_URL": "http://144.37.146.216:5000",
+    "PI_API_CONFIG_ENDPOINT": "/update-settings",
+    "PI_API_CAPTURE_ENDPOINT": "/capture",
+    "PI_API_ACTIVATE_ENDPOINT": "/activate",
+    "PI_API_SET_MODE_ENDPOINT": "/set-mode",
+    "PI_API_STATUS_ENDPOINT": "/get-status",
+    "PI_API_TIMEOUT_SECONDS": 10,
+}
+
+
+def _load_config() -> dict[str, object]:
+    if not CONFIG_JSON_PATH.exists():
+        CONFIG_JSON_PATH.write_text(json.dumps(DEFAULT_CONFIG, indent=2) + "\n", encoding="utf-8")
+        return DEFAULT_CONFIG.copy()
+
+    loaded = json.loads(CONFIG_JSON_PATH.read_text(encoding="utf-8"))
+    merged = DEFAULT_CONFIG.copy()
+    merged.update(loaded)
+    return merged
+
+
+_CONFIG = _load_config()
+
+CLIENT_USERNAME = _CONFIG["CLIENT_USERNAME"]
+CLIENT_IP = _CONFIG["CLIENT_IP"]
+IMAGE_QUALITY = _CONFIG["IMAGE_QUALITY"]
+IMAGE_DIRECTORY = _CONFIG["IMAGE_DIRECTORY"]
+IMAGE_CAPTURE_GPIO_PIN = _CONFIG["IMAGE_CAPTURE_GPIO_PIN"]
+PI_API_BASE_URL = _CONFIG["PI_API_BASE_URL"]
+PI_API_CONFIG_ENDPOINT = _CONFIG["PI_API_CONFIG_ENDPOINT"]
+PI_API_CAPTURE_ENDPOINT = _CONFIG["PI_API_CAPTURE_ENDPOINT"]
+PI_API_ACTIVATE_ENDPOINT = _CONFIG["PI_API_ACTIVATE_ENDPOINT"]
+PI_API_SET_MODE_ENDPOINT = _CONFIG["PI_API_SET_MODE_ENDPOINT"]
+PI_API_STATUS_ENDPOINT = _CONFIG["PI_API_STATUS_ENDPOINT"]
+PI_API_TIMEOUT_SECONDS = _CONFIG["PI_API_TIMEOUT_SECONDS"]
