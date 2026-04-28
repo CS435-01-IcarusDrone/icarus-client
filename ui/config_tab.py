@@ -84,6 +84,7 @@ class ConfigTab(ttk.Frame):
             self.status_var.set("Local config saved, but Pi upload failed.")
             return
 
+        self.app.mark_pi_config_uploaded()
         self.status_var.set(f"Config saved locally and uploaded to the Raspberry Pi API. {message}")
 
     def connect(self) -> None:
