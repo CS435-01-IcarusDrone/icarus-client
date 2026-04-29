@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import io
 import json
 import re
 import shutil
@@ -76,6 +77,27 @@ def _build_pi_api_url(endpoint: str) -> str:
     return urljoin(base_url, endpoint.lstrip("/"))
 
 
+def _response_message(response: "requests.Response", default: str) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        text = response.text.strip()
+        if not text:
+            return default
+        if "text/html" in response.headers.get("Content-Type", "").lower():
+            text = re.sub(r"<[^>]+>", " ", text)
+            text = re.sub(r"\s+", " ", text).strip()
+        return text or default
+
+    if isinstance(payload, dict):
+        for key in ("message", "error", "mode"):
+            value = payload.get(key)
+            if value:
+                return str(value)
+
+    return default
+
+
 def connect_to_pi_api() -> str:
     if requests is None:
         raise RuntimeError("requests is not installed in this environment.")
@@ -99,7 +121,7 @@ def get_pi_status() -> str:
     try:
         response.raise_for_status()
     except Exception:
-        message = response.text.strip() or f"Status request failed with HTTP {response.status_code}."
+        message = _response_message(response, f"Status request failed with HTTP {response.status_code}.")
         raise RuntimeError(message)
 
     try:
@@ -120,21 +142,26 @@ def get_pi_status() -> str:
             f"Directory: {image_directory or 'unknown'}"
         )
 
-    return payload.get("message", "Status retrieved.")
+    if isinstance(payload, dict) and payload:
+        return " | ".join(f"{key}: {value}" for key, value in payload.items())
+
+    return "Status retrieved."
 
 
 def upload_pi_config() -> str:
     if requests is None:
         raise RuntimeError("requests is not installed in this environment.")
 
+    pi_config = json.dumps(build_pi_config_payload(), indent=2).encode("utf-8")
     response = requests.post(
         _build_pi_api_url(config.PI_API_CONFIG_ENDPOINT),
+        files={"file": ("received.json", io.BytesIO(pi_config), "application/json")},
         timeout=float(config.PI_API_TIMEOUT_SECONDS),
     )
     try:
         response.raise_for_status()
     except Exception:
-        message = response.text.strip() or f"Update settings request failed with HTTP {response.status_code}."
+        message = _response_message(response, f"Config upload failed with HTTP {response.status_code}.")
         raise RuntimeError(message)
 
     try:
@@ -142,10 +169,24 @@ def upload_pi_config() -> str:
     except ValueError:
         text = response.text.strip()
         if text:
-            return text
-        return "Remote settings update complete."
+            upload_message = text
+        else:
+            upload_message = "Remote config upload complete."
+    else:
+        upload_message = payload.get("message", "Remote config upload complete.")
 
-    return payload.get("message", "Remote settings update complete.")
+    response = requests.post(
+        _build_pi_api_url(config.PI_API_SETTINGS_ENDPOINT),
+        timeout=float(config.PI_API_TIMEOUT_SECONDS),
+    )
+    try:
+        response.raise_for_status()
+    except Exception:
+        message = _response_message(response, f"Settings update failed with HTTP {response.status_code}.")
+        raise RuntimeError(message)
+
+    settings_message = _response_message(response, "Settings updated.")
+    return f"{upload_message} {settings_message}"
 
 
 def upload_file_to_pi(file_path: Path) -> str:
@@ -178,7 +219,7 @@ def trigger_remote_capture() -> Path:
     try:
         response.raise_for_status()
     except Exception:
-        message = response.text.strip() or f"Capture request failed with HTTP {response.status_code}."
+        message = _response_message(response, f"Capture request failed with HTTP {response.status_code}.")
         raise RuntimeError(message)
 
     content_type = response.headers.get("Content-Type", "").lower()
@@ -187,7 +228,7 @@ def trigger_remote_capture() -> Path:
             payload = response.json()
         except ValueError:
             raise RuntimeError("Capture endpoint returned invalid JSON.")
-        raise RuntimeError(payload.get("message", "Capture failed."))
+        raise RuntimeError(payload.get("message") or payload.get("error") or "Capture failed.")
 
     destination = ensure_directory(config.IMAGE_DIRECTORY) / _capture_filename_from_response(response)
     with destination.open("wb") as output_file:
@@ -208,7 +249,7 @@ def activate_remote_camera() -> str:
     try:
         response.raise_for_status()
     except Exception:
-        message = response.text.strip() or f"Activate request failed with HTTP {response.status_code}."
+        message = _response_message(response, f"Activate request failed with HTTP {response.status_code}.")
         raise RuntimeError(message)
 
     try:
@@ -238,7 +279,7 @@ def set_remote_camera_mode(mode: str) -> str:
     try:
         response.raise_for_status()
     except Exception:
-        message = response.text.strip() or f"Set mode request failed with HTTP {response.status_code}."
+        message = _response_message(response, f"Set mode request failed with HTTP {response.status_code}.")
         raise RuntimeError(message)
 
     try:

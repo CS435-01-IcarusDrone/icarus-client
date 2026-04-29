@@ -34,33 +34,37 @@ class ConfigTab(ttk.Frame):
         self.pi_api_config_endpoint_var = tk.StringVar(value=config.PI_API_CONFIG_ENDPOINT)
         ttk.Entry(self, textvariable=self.pi_api_config_endpoint_var).grid(row=4, column=1, sticky="ew", pady=(0, 10))
 
-        ttk.Label(self, text="Capture Endpoint").grid(row=5, column=0, sticky="w", padx=(0, 12), pady=(0, 10))
+        ttk.Label(self, text="Settings Endpoint").grid(row=5, column=0, sticky="w", padx=(0, 12), pady=(0, 10))
+        self.pi_api_settings_endpoint_var = tk.StringVar(value=config.PI_API_SETTINGS_ENDPOINT)
+        ttk.Entry(self, textvariable=self.pi_api_settings_endpoint_var).grid(row=5, column=1, sticky="ew", pady=(0, 10))
+
+        ttk.Label(self, text="Capture Endpoint").grid(row=6, column=0, sticky="w", padx=(0, 12), pady=(0, 10))
         self.pi_api_capture_endpoint_var = tk.StringVar(value=config.PI_API_CAPTURE_ENDPOINT)
-        ttk.Entry(self, textvariable=self.pi_api_capture_endpoint_var).grid(row=5, column=1, sticky="ew", pady=(0, 10))
+        ttk.Entry(self, textvariable=self.pi_api_capture_endpoint_var).grid(row=6, column=1, sticky="ew", pady=(0, 10))
 
-        ttk.Label(self, text="Activate Endpoint").grid(row=6, column=0, sticky="w", padx=(0, 12), pady=(0, 10))
+        ttk.Label(self, text="Activate Endpoint").grid(row=7, column=0, sticky="w", padx=(0, 12), pady=(0, 10))
         self.pi_api_activate_endpoint_var = tk.StringVar(value=config.PI_API_ACTIVATE_ENDPOINT)
-        ttk.Entry(self, textvariable=self.pi_api_activate_endpoint_var).grid(row=6, column=1, sticky="ew", pady=(0, 10))
+        ttk.Entry(self, textvariable=self.pi_api_activate_endpoint_var).grid(row=7, column=1, sticky="ew", pady=(0, 10))
 
-        ttk.Label(self, text="Set Mode Endpoint").grid(row=7, column=0, sticky="w", padx=(0, 12), pady=(0, 10))
+        ttk.Label(self, text="Set Mode Endpoint").grid(row=8, column=0, sticky="w", padx=(0, 12), pady=(0, 10))
         self.pi_api_set_mode_endpoint_var = tk.StringVar(value=config.PI_API_SET_MODE_ENDPOINT)
-        ttk.Entry(self, textvariable=self.pi_api_set_mode_endpoint_var).grid(row=7, column=1, sticky="ew", pady=(0, 10))
+        ttk.Entry(self, textvariable=self.pi_api_set_mode_endpoint_var).grid(row=8, column=1, sticky="ew", pady=(0, 10))
 
-        ttk.Label(self, text="Status Endpoint").grid(row=8, column=0, sticky="w", padx=(0, 12), pady=(0, 10))
+        ttk.Label(self, text="Status Endpoint").grid(row=9, column=0, sticky="w", padx=(0, 12), pady=(0, 10))
         self.pi_api_status_endpoint_var = tk.StringVar(value=config.PI_API_STATUS_ENDPOINT)
-        ttk.Entry(self, textvariable=self.pi_api_status_endpoint_var).grid(row=8, column=1, sticky="ew", pady=(0, 10))
+        ttk.Entry(self, textvariable=self.pi_api_status_endpoint_var).grid(row=9, column=1, sticky="ew", pady=(0, 10))
 
-        ttk.Label(self, text="API Timeout (s)").grid(row=9, column=0, sticky="w", padx=(0, 12), pady=(0, 10))
+        ttk.Label(self, text="API Timeout (s)").grid(row=10, column=0, sticky="w", padx=(0, 12), pady=(0, 10))
         self.pi_api_timeout_var = tk.StringVar(value=str(config.PI_API_TIMEOUT_SECONDS))
-        ttk.Entry(self, textvariable=self.pi_api_timeout_var, width=12).grid(row=9, column=1, sticky="ew", pady=(0, 10))
+        ttk.Entry(self, textvariable=self.pi_api_timeout_var, width=12).grid(row=10, column=1, sticky="ew", pady=(0, 10))
 
-        ttk.Button(self, text="Save Local Config", command=self.save_config).grid(row=10, column=0, sticky="w", pady=(8, 0))
-        ttk.Button(self, text="Save + Upload To Pi", command=self.save_and_upload_config).grid(row=10, column=1, sticky="w", pady=(8, 0))
-        ttk.Button(self, text="Connect", command=self.connect).grid(row=10, column=2, sticky="w", pady=(8, 0))
-        ttk.Button(self, text="Status", command=self.status).grid(row=10, column=3, sticky="w", pady=(8, 0))
+        ttk.Button(self, text="Save Local Config", command=self.save_config).grid(row=11, column=0, sticky="w", pady=(8, 0))
+        ttk.Button(self, text="Save + Upload To Pi", command=self.save_and_upload_config).grid(row=11, column=1, sticky="w", pady=(8, 0))
+        ttk.Button(self, text="Connect", command=self.connect).grid(row=11, column=2, sticky="w", pady=(8, 0))
+        ttk.Button(self, text="Status", command=self.status).grid(row=11, column=3, sticky="w", pady=(8, 0))
 
         self.status_var = tk.StringVar(value="Config loaded.")
-        ttk.Label(self, textvariable=self.status_var).grid(row=11, column=0, columnspan=4, sticky="w", pady=(16, 0))
+        ttk.Label(self, textvariable=self.status_var).grid(row=12, column=0, columnspan=4, sticky="w", pady=(16, 0))
 
     def choose_directory(self) -> None:
         selected = filedialog.askdirectory(initialdir=str(Path(self.directory_var.get()).expanduser()))
@@ -84,7 +88,6 @@ class ConfigTab(ttk.Frame):
             self.status_var.set("Local config saved, but Pi upload failed.")
             return
 
-        self.app.mark_pi_config_uploaded()
         self.status_var.set(f"Config saved locally and uploaded to the Raspberry Pi API. {message}")
 
     def connect(self) -> None:
@@ -143,11 +146,12 @@ class ConfigTab(ttk.Frame):
 
         pi_api_base_url = self.pi_api_base_url_var.get().strip()
         pi_api_config_endpoint = self.pi_api_config_endpoint_var.get().strip()
+        pi_api_settings_endpoint = self.pi_api_settings_endpoint_var.get().strip()
         pi_api_capture_endpoint = self.pi_api_capture_endpoint_var.get().strip()
         pi_api_activate_endpoint = self.pi_api_activate_endpoint_var.get().strip()
         pi_api_set_mode_endpoint = self.pi_api_set_mode_endpoint_var.get().strip()
         pi_api_status_endpoint = self.pi_api_status_endpoint_var.get().strip()
-        if not pi_api_base_url or not pi_api_config_endpoint or not pi_api_capture_endpoint or not pi_api_activate_endpoint or not pi_api_set_mode_endpoint or not pi_api_status_endpoint:
+        if not pi_api_base_url or not pi_api_config_endpoint or not pi_api_settings_endpoint or not pi_api_capture_endpoint or not pi_api_activate_endpoint or not pi_api_set_mode_endpoint or not pi_api_status_endpoint:
             messagebox.showerror("Invalid API config", "Pi API base URL and endpoints are required.")
             return False
 
@@ -157,6 +161,7 @@ class ConfigTab(ttk.Frame):
             "IMAGE_DIRECTORY": resolved_directory,
             "PI_API_BASE_URL": pi_api_base_url,
             "PI_API_CONFIG_ENDPOINT": pi_api_config_endpoint,
+            "PI_API_SETTINGS_ENDPOINT": pi_api_settings_endpoint,
             "PI_API_CAPTURE_ENDPOINT": pi_api_capture_endpoint,
             "PI_API_ACTIVATE_ENDPOINT": pi_api_activate_endpoint,
             "PI_API_SET_MODE_ENDPOINT": pi_api_set_mode_endpoint,
@@ -168,6 +173,7 @@ class ConfigTab(ttk.Frame):
         self.directory_var.set(config.IMAGE_DIRECTORY)
         self.pi_api_base_url_var.set(config.PI_API_BASE_URL)
         self.pi_api_config_endpoint_var.set(config.PI_API_CONFIG_ENDPOINT)
+        self.pi_api_settings_endpoint_var.set(config.PI_API_SETTINGS_ENDPOINT)
         self.pi_api_capture_endpoint_var.set(config.PI_API_CAPTURE_ENDPOINT)
         self.pi_api_activate_endpoint_var.set(config.PI_API_ACTIVATE_ENDPOINT)
         self.pi_api_set_mode_endpoint_var.set(config.PI_API_SET_MODE_ENDPOINT)

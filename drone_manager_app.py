@@ -12,13 +12,12 @@ class DroneManagerApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Raspberry Pi Camera Manager")
-        self.geometry("1100x720")
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        self.geometry(f"{screen_width}x{screen_height}+0+0")
 
         self.camera_controller = CameraController()
         self.model_processor = ModelProcessor()
-        self.pi_config_uploaded = False
-        self.pi_mode_set = False
-        self.pi_camera_activated = False
 
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True)
@@ -30,7 +29,6 @@ class DroneManagerApp(tk.Tk):
         notebook.add(self.images_tab, text="Images")
 
         self.refresh_from_config()
-        self.refresh_pi_workflow_controls()
         self.after(3000, self.poll_for_images)
 
     def refresh_from_config(self) -> None:
@@ -41,33 +39,6 @@ class DroneManagerApp(tk.Tk):
     def poll_for_images(self) -> None:
         self.images_tab.refresh_images()
         self.after(3000, self.poll_for_images)
-
-    def refresh_pi_workflow_controls(self) -> None:
-        self.images_tab.update_pi_workflow_controls(
-            config_uploaded=self.pi_config_uploaded,
-            mode_set=self.pi_mode_set,
-            camera_activated=self.pi_camera_activated,
-        )
-
-    def mark_pi_config_uploaded(self) -> None:
-        self.pi_config_uploaded = True
-        self.pi_mode_set = False
-        self.pi_camera_activated = False
-        self.refresh_pi_workflow_controls()
-
-    def mark_pi_mode_set(self) -> None:
-        self.pi_mode_set = True
-        self.pi_camera_activated = False
-        self.refresh_pi_workflow_controls()
-
-    def mark_pi_camera_activated(self) -> None:
-        self.pi_camera_activated = True
-        self.refresh_pi_workflow_controls()
-
-    def reset_pi_mode_steps(self) -> None:
-        self.pi_mode_set = False
-        self.pi_camera_activated = False
-        self.refresh_pi_workflow_controls()
 
 
 def main() -> None:

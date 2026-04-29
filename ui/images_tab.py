@@ -57,7 +57,6 @@ class ImagesTab(ttk.Frame):
             self.camera_mode_var.get(),
             "image",
             "video",
-            command=self._on_camera_mode_change,
         ).grid(row=0, column=3, padx=(0, 12), sticky="e")
         self.set_mode_button = ttk.Button(toolbar, text="Set Mode", command=self.set_camera_mode)
         self.set_mode_button.grid(row=0, column=4, padx=(0, 12), sticky="e")
@@ -93,20 +92,6 @@ class ImagesTab(ttk.Frame):
 
         self.status_var = tk.StringVar(value="Waiting for images.")
         ttk.Label(self, textvariable=self.status_var).grid(row=3, column=0, sticky="w", pady=(12, 0))
-
-    def update_pi_workflow_controls(self, config_uploaded: bool, mode_set: bool, camera_activated: bool) -> None:
-        self.set_mode_button.configure(
-            text="Set Mode" if config_uploaded else "Set Mode (locked)",
-            state=tk.NORMAL if config_uploaded else tk.DISABLED,
-        )
-        self.activate_button.configure(
-            text="Activate Camera" if mode_set else "Activate Camera (locked)",
-            state=tk.NORMAL if mode_set else tk.DISABLED,
-        )
-        self.capture_button.configure(
-            text="Capture Image" if camera_activated else "Capture Image (locked)",
-            state=tk.NORMAL if camera_activated else tk.DISABLED,
-        )
 
     def current_directory(self) -> Path:
         return ensure_directory(config.IMAGE_DIRECTORY)
@@ -210,9 +195,6 @@ class ImagesTab(ttk.Frame):
         if image_path.exists():
             self.show_image_for_pipeline(image_path)
 
-    def _on_camera_mode_change(self, _selected: str | None = None) -> None:
-        self.app.reset_pi_mode_steps()
-
     def _selected_source_image(self) -> Path | None:
         selection = self.image_list.curselection()
         if not selection:
@@ -292,7 +274,6 @@ class ImagesTab(ttk.Frame):
             messagebox.showerror("Set mode failed", str(exc))
             return
 
-        self.app.mark_pi_mode_set()
         self.status_var.set(message)
 
     def fetch_status(self) -> None:
@@ -311,5 +292,4 @@ class ImagesTab(ttk.Frame):
             messagebox.showerror("Activate failed", str(exc))
             return
 
-        self.app.mark_pi_camera_activated()
         self.status_var.set(message)
