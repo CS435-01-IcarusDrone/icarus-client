@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin
@@ -47,6 +48,15 @@ MODEL_PATHS = {
     "yolov8m": Path(__file__).with_name("models") / "yolov8m" / "yolov8m.pt",
     "vehicle_v4": Path(__file__).with_name("models") / "v4_vehicle_model" / "vehicle_type_v4.pt",
 }
+YOLO_VEHICLE_LABELS = {"bicycle", "car", "motorcycle", "bus", "truck", "train"}
+YOLO_PERSON_LABELS = {"person"}
+
+
+@dataclass(frozen=True)
+class ProcessedImageResult:
+    output_path: Path
+    vehicle_count: int = 0
+    person_count: int = 0
 
 
 def ensure_directory(path_text: str) -> Path:
@@ -391,7 +401,28 @@ class ModelProcessor:
 
         return None
 
-    def _draw_combined_pipeline(self, image_path: Path, output_path: Path) -> Path:
+    def _count_result_detections(self, result: object, model_key: str) -> tuple[int, int]:
+        boxes = getattr(result, "boxes", None)
+        if boxes is None:
+            return 0, 0
+
+        vehicle_count = 0
+        person_count = 0
+        for box in boxes:
+            if model_key == "vehicle_v4":
+                vehicle_count += 1
+                continue
+
+            class_id = int(box.cls.item())
+            label = str(result.names[class_id]).strip().lower()
+            if label in YOLO_VEHICLE_LABELS:
+                vehicle_count += 1
+            elif label in YOLO_PERSON_LABELS:
+                person_count += 1
+
+        return vehicle_count, person_count
+
+    def _draw_combined_pipeline(self, image_path: Path, output_path: Path) -> ProcessedImageResult:
         if Image is None or ImageDraw is None:
             raise RuntimeError("Pillow is required to build the combined model preview.")
 
@@ -403,7 +434,10 @@ class ModelProcessor:
 
         if getattr(result, "boxes", None) is None:
             annotated_image.save(output_path)
-            return output_path
+            return ProcessedImageResult(output_path)
+
+        vehicle_count = 0
+        person_count = 0
 
         for box in result.boxes:
             x1, y1, x2, y2 = [int(value) for value in box.xyxy[0].tolist()]
@@ -415,6 +449,12 @@ class ModelProcessor:
             base_label = result.names[class_id]
             label = f"{base_label} {confidence:.2f}"
             color = "lime"
+            normalized_label = str(base_label).strip().lower()
+
+            if normalized_label in YOLO_VEHICLE_LABELS:
+                vehicle_count += 1
+            elif normalized_label in YOLO_PERSON_LABELS:
+                person_count += 1
 
             if base_label == "car":
                 crop = source_image.crop((x1, y1, x2, y2))
@@ -433,20 +473,22 @@ class ModelProcessor:
             draw.text((x1 + 4, text_top + 3), label, fill="black")
 
         annotated_image.save(output_path)
-        return output_path
+        return ProcessedImageResult(output_path, vehicle_count, person_count)
 
-    def process_image(self, image_path: Path, pipeline_name: str, output_directory: Path) -> Path:
+    def process_image(self, image_path: Path, pipeline_name: str, output_directory: Path) -> ProcessedImageResult:
         pipeline = MODEL_PIPELINES[pipeline_name]
         output_directory.mkdir(parents=True, exist_ok=True)
         output_path = output_directory / image_path.name
 
         if not pipeline:
             shutil.copy2(image_path, output_path)
-            return output_path
+            return ProcessedImageResult(output_path)
 
         if pipeline_name == "YOLOv8m + Vehicle v4":
             return self._draw_combined_pipeline(image_path, output_path)
 
+        vehicle_count = 0
+        person_count = 0
         with tempfile.TemporaryDirectory() as temp_dir_name:
             current_source = image_path
             temp_dir = Path(temp_dir_name)
@@ -455,12 +497,13 @@ class ModelProcessor:
                 model = self.ensure_model(model_key)
                 results = model.predict(source=str(current_source), verbose=False)
                 result = results[0]
+                vehicle_count, person_count = self._count_result_detections(result, model_key)
 
                 stage_output = output_path if index == len(pipeline) - 1 else temp_dir / f"stage_{index}_{image_path.name}"
                 result.save(filename=str(stage_output))
                 current_source = stage_output
 
-            return output_path
+            return ProcessedImageResult(output_path, vehicle_count, person_count)
 
 
 class CameraController:

@@ -31,9 +31,10 @@ class ImagesTab(ttk.Frame):
         self.preview_image = None
         self.last_seen_image: Path | None = None
         self.displayed_image_path: Path | None = None
+        self.detection_counts: dict[tuple[str, str], tuple[int, int]] = {}
 
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(1, weight=1)
+        self.rowconfigure(2, weight=1)
 
         toolbar = ttk.Frame(self)
         toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 12))
@@ -87,8 +88,16 @@ class ImagesTab(ttk.Frame):
         self.image_list.grid(row=0, column=0, sticky="ns", padx=(0, 12))
         self.image_list.bind("<<ListboxSelect>>", self._on_select)
 
-        self.preview_label = ttk.Label(content, text="No images found.", anchor="center")
-        self.preview_label.grid(row=0, column=1, sticky="nsew")
+        preview_panel = ttk.Frame(content)
+        preview_panel.grid(row=0, column=1, sticky="nsew")
+        preview_panel.columnconfigure(0, weight=1)
+        preview_panel.rowconfigure(1, weight=1)
+
+        self.counts_var = tk.StringVar(value="Vehicles: --    People: --")
+        ttk.Label(preview_panel, textvariable=self.counts_var, anchor="center").grid(row=0, column=0, sticky="ew", pady=(0, 8))
+
+        self.preview_label = ttk.Label(preview_panel, text="No images found.", anchor="center")
+        self.preview_label.grid(row=1, column=0, sticky="nsew")
 
         self.status_var = tk.StringVar(value="Waiting for images.")
         ttk.Label(self, textvariable=self.status_var).grid(row=3, column=0, sticky="w", pady=(12, 0))
@@ -101,6 +110,26 @@ class ImagesTab(ttk.Frame):
 
     def processed_directory(self) -> Path:
         return self.current_directory() / "processed" / sanitize_pipeline_name(self.pipeline_var.get())
+
+    def _counts_key(self, image_path: Path, pipeline_name: str | None = None) -> tuple[str, str]:
+        return (pipeline_name or self.pipeline_var.get(), image_path.name)
+
+    def _set_detection_counts(self, vehicle_count: int | None = None, person_count: int | None = None) -> None:
+        if vehicle_count is None or person_count is None:
+            self.counts_var.set("Vehicles: --    People: --")
+            return
+
+        self.counts_var.set(f"Vehicles: {vehicle_count}    People: {person_count}")
+
+    def _store_detection_counts(self, image_path: Path, pipeline_name: str, vehicle_count: int, person_count: int) -> None:
+        self.detection_counts[self._counts_key(image_path, pipeline_name)] = (vehicle_count, person_count)
+
+    def _show_stored_detection_counts(self, image_path: Path) -> None:
+        counts = self.detection_counts.get(self._counts_key(image_path))
+        if counts is None:
+            self._set_detection_counts()
+        else:
+            self._set_detection_counts(*counts)
 
     def refresh_images(self, select_path: Path | None = None) -> None:
         self.signal_var.set(get_wifi_signal_status())
@@ -127,6 +156,7 @@ class ImagesTab(ttk.Frame):
             self.last_seen_image = None
             self.preview_image = None
             self.preview_label.configure(text="No images found.", image="")
+            self._set_detection_counts()
             self.status_var.set("Waiting for images.")
             return
 
@@ -165,14 +195,17 @@ class ImagesTab(ttk.Frame):
         pipeline_name = self.pipeline_var.get()
         if pipeline_name == "Original":
             self.show_image(image_path)
+            self._set_detection_counts()
             return
 
         processed_path = self.processed_directory() / image_path.name
         if processed_path.exists():
             self.show_image(processed_path)
+            self._show_stored_detection_counts(image_path)
             self.status_var.set(f"Showing processed image: {processed_path.name}")
         else:
             self.show_image(image_path)
+            self._set_detection_counts()
             self.status_var.set(f"No processed image yet for {pipeline_name}.")
 
     def _on_select(self, _event: object) -> None:
@@ -211,7 +244,7 @@ class ImagesTab(ttk.Frame):
             return
 
         try:
-            output_path = self.app.model_processor.process_image(
+            result = self.app.model_processor.process_image(
                 image_path,
                 self.pipeline_var.get(),
                 self.processed_directory(),
@@ -220,8 +253,13 @@ class ImagesTab(ttk.Frame):
             messagebox.showerror("Processing failed", str(exc))
             return
 
-        self.show_image(output_path if self.pipeline_var.get() != "Original" else image_path)
-        self.status_var.set(f"Processed {image_path.name} with {self.pipeline_var.get()}.")
+        self._store_detection_counts(image_path, self.pipeline_var.get(), result.vehicle_count, result.person_count)
+        self.show_image(result.output_path if self.pipeline_var.get() != "Original" else image_path)
+        self._set_detection_counts(result.vehicle_count, result.person_count)
+        self.status_var.set(
+            f"Processed {image_path.name} with {self.pipeline_var.get()}: "
+            f"{result.vehicle_count} vehicles, {result.person_count} people."
+        )
 
     def process_all_images(self) -> None:
         images = [
@@ -233,12 +271,14 @@ class ImagesTab(ttk.Frame):
             return
 
         processed_count = 0
+        total_vehicles = 0
+        total_people = 0
         for image_path in images:
             if not image_path.exists():
                 continue
 
             try:
-                self.app.model_processor.process_image(
+                result = self.app.model_processor.process_image(
                     image_path,
                     self.pipeline_var.get(),
                     self.processed_directory(),
@@ -247,6 +287,9 @@ class ImagesTab(ttk.Frame):
                 messagebox.showerror("Processing failed", f"{image_path.name}: {exc}")
                 return
             processed_count += 1
+            self._store_detection_counts(image_path, self.pipeline_var.get(), result.vehicle_count, result.person_count)
+            total_vehicles += result.vehicle_count
+            total_people += result.person_count
 
         if processed_count == 0:
             messagebox.showerror("Processing failed", "No images were processed.")
@@ -255,7 +298,10 @@ class ImagesTab(ttk.Frame):
         selected_image = self._selected_source_image()
         if selected_image is not None:
             self.show_image_for_pipeline(selected_image)
-        self.status_var.set(f"Processed {processed_count} images with {self.pipeline_var.get()}.")
+        self.status_var.set(
+            f"Processed {processed_count} images with {self.pipeline_var.get()}: "
+            f"{total_vehicles} vehicles, {total_people} people."
+        )
 
     def capture_image(self) -> None:
         try:
