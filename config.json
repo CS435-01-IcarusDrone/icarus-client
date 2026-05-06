@@ -1,15 +1,19 @@
 {
   "CLIENT_USERNAME": "pi",
   "CLIENT_IP": "127.0.0.1",
-  "IMAGE_QUALITY": 95,
+  "IMAGE_QUALITY": 100,
   "IMAGE_DIRECTORY": "images",
   "IMAGE_CAPTURE_GPIO_PIN": 17,
   "PI_API_BASE_URL": "http://10.42.0.1:5000",
   "PI_API_CONFIG_ENDPOINT": "/camera/config",
+  "PI_API_REGISTER_ENDPOINT": "/client/register",
   "PI_API_SETTINGS_ENDPOINT": "/camera/settings",
   "PI_API_TIMEOUT_SECONDS": 10.0,
   "PI_API_CAPTURE_ENDPOINT": "/camera/capture",
+  "PI_API_LATEST_IMAGE_ENDPOINT": "/image/latest",
   "PI_API_ACTIVATE_ENDPOINT": "/camera/activate",
   "PI_API_SET_MODE_ENDPOINT": "/camera/mode",
-  "PI_API_STATUS_ENDPOINT": "/camera/status"
+  "PI_API_STATUS_ENDPOINT": "/camera/status",
+  "IMAGE_SOCKET_HOST": "0.0.0.0",
+  "IMAGE_SOCKET_PORT": 6000
 }

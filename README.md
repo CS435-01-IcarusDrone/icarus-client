@@ -1,6 +1,6 @@
 # CS435DroneManager
 
-Imported YOLOv8 model assets live in:
+Imported model assets live in:
 - `models/v4_vehicle_model/`
 - `models/yolov8m/`
 
@@ -64,4 +64,4 @@ Default API routes expected by the desktop app:
 - `POST /capture`
 - `GET /latest-image`
 
-The `Images` tab also lets you switch processing between `Original`, `YOLOv8m`, `Vehicle v4`, and `YOLOv8m + Vehicle v4`, then process either the selected image or the full image folder. In the combined mode, `YOLOv8m` detects the base objects first and only `car` detections are refined through the v4 model, with one final label drawn per detection. Processed outputs are saved under `IMAGE_DIRECTORY/processed/...`.
+The `Images` tab also lets you switch processing between `Original`, `YOLOv8m`, `Vehicle v1`, and `YOLOv8m + Vehicle v1`, then process either the selected image or the full image folder. In the combined mode, `YOLOv8m` detects the base objects first and only `car` detections are refined through the v1 model, with one final label drawn per detection. Processed outputs are saved under `IMAGE_DIRECTORY/processed/...`.

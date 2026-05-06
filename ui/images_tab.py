@@ -10,6 +10,7 @@ from app_services import (
     SUPPORTED_IMAGE_SUFFIXES,
     activate_remote_camera,
     ensure_directory,
+    get_latest_remote_image,
     get_pi_status,
     get_wifi_signal_status,
     sanitize_pipeline_name,
@@ -32,6 +33,7 @@ class ImagesTab(ttk.Frame):
         self.last_seen_image: Path | None = None
         self.displayed_image_path: Path | None = None
         self.detection_counts: dict[tuple[str, str], tuple[int, int]] = {}
+        self._preview_resize_after_id: str | None = None
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
@@ -45,6 +47,7 @@ class ImagesTab(ttk.Frame):
         toolbar.columnconfigure(5, weight=0)
         toolbar.columnconfigure(6, weight=0)
         toolbar.columnconfigure(7, weight=0)
+        toolbar.columnconfigure(8, weight=0)
 
         ttk.Button(toolbar, text="Refresh", command=self.refresh_images).grid(row=0, column=0, padx=(0, 12))
         self.directory_var = tk.StringVar(value=config.IMAGE_DIRECTORY)
@@ -66,7 +69,9 @@ class ImagesTab(ttk.Frame):
         self.activate_button = ttk.Button(toolbar, text="Activate Camera", command=self.activate_camera)
         self.activate_button.grid(row=0, column=6, padx=(0, 12), sticky="e")
         self.capture_button = ttk.Button(toolbar, text="Capture Image", command=self.capture_image)
-        self.capture_button.grid(row=0, column=7, sticky="e")
+        self.capture_button.grid(row=0, column=7, padx=(0, 12), sticky="e")
+        self.latest_image_button = ttk.Button(toolbar, text="Get Latest Image", command=self.get_latest_image)
+        self.latest_image_button.grid(row=0, column=8, sticky="e")
 
         controls = ttk.Frame(self)
         controls.grid(row=1, column=0, sticky="ew", pady=(0, 12))
@@ -98,6 +103,7 @@ class ImagesTab(ttk.Frame):
 
         self.preview_label = ttk.Label(preview_panel, text="No images found.", anchor="center")
         self.preview_label.grid(row=1, column=0, sticky="nsew")
+        self.preview_label.bind("<Configure>", self._on_preview_resize)
 
         self.status_var = tk.StringVar(value="Waiting for images.")
         ttk.Label(self, textvariable=self.status_var).grid(row=3, column=0, sticky="w", pady=(12, 0))
@@ -186,10 +192,28 @@ class ImagesTab(ttk.Frame):
             return
 
         image = Image.open(image_path)
-        image.thumbnail((800, 600))
+        preview_width = self.preview_label.winfo_width() - 20
+        preview_height = self.preview_label.winfo_height() - 20
+        if preview_width < 100 or preview_height < 100:
+            preview_width = 1200
+            preview_height = 850
+        image.thumbnail((preview_width, preview_height))
         self.preview_image = ImageTk.PhotoImage(image)
         self.preview_label.configure(image=self.preview_image, text="")
         self.displayed_image_path = image_path
+
+    def _on_preview_resize(self, _event: object) -> None:
+        if self.displayed_image_path is None or not self.displayed_image_path.exists():
+            return
+
+        if self._preview_resize_after_id is not None:
+            self.after_cancel(self._preview_resize_after_id)
+        self._preview_resize_after_id = self.after(150, self._refresh_displayed_image)
+
+    def _refresh_displayed_image(self) -> None:
+        self._preview_resize_after_id = None
+        if self.displayed_image_path is not None and self.displayed_image_path.exists():
+            self.show_image(self.displayed_image_path)
 
     def show_image_for_pipeline(self, image_path: Path) -> None:
         pipeline_name = self.pipeline_var.get()
@@ -312,6 +336,16 @@ class ImagesTab(ttk.Frame):
 
         self.refresh_images(select_path=image_path)
         self.status_var.set(f"Captured {image_path.name}.")
+
+    def get_latest_image(self) -> None:
+        try:
+            image_path = get_latest_remote_image()
+        except Exception as exc:
+            messagebox.showerror("Latest image failed", str(exc))
+            return
+
+        self.refresh_images(select_path=image_path)
+        self.status_var.set(f"Downloaded latest image: {image_path.name}.")
 
     def set_camera_mode(self) -> None:
         try:

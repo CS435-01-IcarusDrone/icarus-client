@@ -5,11 +5,14 @@ import io
 import json
 import re
 import shutil
+import socket
 import subprocess
 import tempfile
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urljoin
 
 import config
@@ -25,10 +28,11 @@ except ImportError:
     Picamera2 = None
 
 try:
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageFont
 except ImportError:
     Image = None
     ImageDraw = None
+    ImageFont = None
 
 try:
     from ultralytics import YOLO
@@ -41,15 +45,22 @@ SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 MODEL_PIPELINES = {
     "Original": (),
     "YOLOv8m": ("yolov8m",),
-    "Vehicle v4": ("vehicle_v4",),
-    "YOLOv8m + Vehicle v4": ("yolov8m", "vehicle_v4"),
+    "Vehicle v1": ("vehicle_v1",),
+    "YOLOv8m + Vehicle v1": ("yolov8m", "vehicle_v1"),
 }
 MODEL_PATHS = {
     "yolov8m": Path(__file__).with_name("models") / "yolov8m" / "yolov8m.pt",
-    "vehicle_v4": Path(__file__).with_name("models") / "v4_vehicle_model" / "vehicle_type_v4.pt",
+    "vehicle_v1": Path(__file__).with_name("models") / "v4_vehicle_model" / "vehicle_type_v4.pt",
 }
-YOLO_VEHICLE_LABELS = {"bicycle", "car", "motorcycle", "bus", "truck", "train"}
+YOLO_VEHICLE_LABELS = {"car", "bus", "truck"}
 YOLO_PERSON_LABELS = {"person"}
+YOLO_FILTER_LABELS = YOLO_PERSON_LABELS | YOLO_VEHICLE_LABELS
+YOLO_COCO_CLASS_IDS = [0, 2, 5, 7]
+ANNOTATION_FONT_SIZE = 48
+ANNOTATION_LABEL_PADDING_X = 18
+ANNOTATION_LABEL_PADDING_Y = 12
+ANNOTATION_BOX_WIDTH = 5
+DETECTION_CONFIDENCE_THRESHOLD = 0.60
 
 
 @dataclass(frozen=True)
@@ -118,6 +129,23 @@ def connect_to_pi_api() -> str:
     )
     response.raise_for_status()
     return f"Connected to Pi API at {config.PI_API_BASE_URL}."
+
+
+def register_with_pi_api() -> str:
+    if requests is None:
+        raise RuntimeError("requests is not installed in this environment.")
+
+    response = requests.post(
+        _build_pi_api_url(config.PI_API_REGISTER_ENDPOINT),
+        timeout=float(config.PI_API_TIMEOUT_SECONDS),
+    )
+    try:
+        response.raise_for_status()
+    except Exception:
+        message = _response_message(response, f"Registration failed with HTTP {response.status_code}.")
+        raise RuntimeError(message)
+
+    return _response_message(response, "Registered with Pi image sender.")
 
 
 def get_pi_status() -> str:
@@ -248,6 +276,37 @@ def trigger_remote_capture() -> Path:
     return destination
 
 
+def get_latest_remote_image() -> Path:
+    if requests is None:
+        raise RuntimeError("requests is not installed in this environment.")
+
+    response = requests.get(
+        _build_pi_api_url(config.PI_API_LATEST_IMAGE_ENDPOINT),
+        stream=True,
+        timeout=float(config.PI_API_TIMEOUT_SECONDS),
+    )
+    try:
+        response.raise_for_status()
+    except Exception:
+        message = _response_message(response, f"Latest image request failed with HTTP {response.status_code}.")
+        raise RuntimeError(message)
+
+    content_type = response.headers.get("Content-Type", "").lower()
+    if "application/json" in content_type:
+        try:
+            payload = response.json()
+        except ValueError:
+            raise RuntimeError("Latest image endpoint returned invalid JSON.")
+        raise RuntimeError(payload.get("message") or payload.get("error") or "Latest image request failed.")
+
+    destination = ensure_directory(config.IMAGE_DIRECTORY) / _capture_filename_from_response(response, "latest")
+    with destination.open("wb") as output_file:
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                output_file.write(chunk)
+    return destination
+
+
 def activate_remote_camera() -> str:
     if requests is None:
         raise RuntimeError("requests is not installed in this environment.")
@@ -302,7 +361,7 @@ def set_remote_camera_mode(mode: str) -> str:
 
     return payload.get("message", f"Camera mode set to {normalized_mode}.")
 
-def _capture_filename_from_response(response: "requests.Response") -> str:
+def _capture_filename_from_response(response: "requests.Response", prefix: str = "capture") -> str:
     header = response.headers.get("Content-Disposition", "")
     match = re.search(r'filename="?([^"]+)"?', header)
     if match:
@@ -313,7 +372,104 @@ def _capture_filename_from_response(response: "requests.Response") -> str:
     content_type = response.headers.get("Content-Type", "").lower()
     if "png" in content_type:
         suffix = ".png"
-    return f"capture_{timestamp}{suffix}"
+    return f"{prefix}_{timestamp}{suffix}"
+
+
+def build_socket_image_path() -> Path:
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
+    return ensure_directory(config.IMAGE_DIRECTORY) / f"socket_capture_{timestamp}.jpg"
+
+
+class ImageSocketReceiver:
+    def __init__(
+        self,
+        on_image_received: Callable[[Path], None] | None = None,
+        on_status: Callable[[str], None] | None = None,
+    ) -> None:
+        self.on_image_received = on_image_received
+        self.on_status = on_status
+        self._server_socket: socket.socket | None = None
+        self._thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
+
+    def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._listen, name="ImageSocketReceiver", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._server_socket is not None:
+            try:
+                self._server_socket.close()
+            except OSError:
+                pass
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=1)
+
+    def _emit_status(self, message: str) -> None:
+        if self.on_status is not None:
+            self.on_status(message)
+
+    def _emit_image_received(self, image_path: Path) -> None:
+        if self.on_image_received is not None:
+            self.on_image_received(image_path)
+
+    def _listen(self) -> None:
+        host = str(config.IMAGE_SOCKET_HOST)
+        port = int(config.IMAGE_SOCKET_PORT)
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+                self._server_socket = server_socket
+                server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                server_socket.bind((host, port))
+                server_socket.listen(5)
+                server_socket.settimeout(1)
+                self._emit_status(f"Image socket listening on {host}:{port}.")
+
+                while not self._stop_event.is_set():
+                    try:
+                        connection, address = server_socket.accept()
+                    except socket.timeout:
+                        continue
+                    except OSError:
+                        if not self._stop_event.is_set():
+                            self._emit_status("Image socket stopped unexpectedly.")
+                        break
+
+                    with connection:
+                        self._receive_image(connection, address)
+        except OSError as exc:
+            self._emit_status(f"Image socket failed: {exc}")
+        finally:
+            self._server_socket = None
+
+    def _receive_image(self, connection: socket.socket, address: tuple[str, int]) -> None:
+        image_path = build_socket_image_path()
+        bytes_received = 0
+        try:
+            with image_path.open("wb") as output_file:
+                while True:
+                    chunk = connection.recv(4096)
+                    if not chunk:
+                        break
+                    bytes_received += len(chunk)
+                    output_file.write(chunk)
+        except OSError as exc:
+            image_path.unlink(missing_ok=True)
+            self._emit_status(f"Image socket receive failed from {address[0]}: {exc}")
+            return
+
+        if bytes_received == 0:
+            image_path.unlink(missing_ok=True)
+            self._emit_status(f"Image socket received an empty transfer from {address[0]}.")
+            return
+
+        self._emit_status(f"Received image from {address[0]}: {image_path.name}.")
+        self._emit_image_received(image_path)
 
 
 def get_wifi_signal_status() -> str:
@@ -382,7 +538,7 @@ class ModelProcessor:
         return self.models[model_key]
 
     def _refine_car_label(self, crop_image: Image.Image) -> tuple[str, float] | None:
-        vehicle_model = self.ensure_model("vehicle_v4")
+        vehicle_model = self.ensure_model("vehicle_v1")
         results = vehicle_model.predict(source=crop_image, verbose=False)
         result = results[0]
 
@@ -409,11 +565,17 @@ class ModelProcessor:
         vehicle_count = 0
         person_count = 0
         for box in boxes:
-            if model_key == "vehicle_v4":
+            if model_key == "vehicle_v1":
+                if float(box.conf.item()) < DETECTION_CONFIDENCE_THRESHOLD:
+                    continue
                 vehicle_count += 1
                 continue
 
             class_id = int(box.cls.item())
+            confidence = float(box.conf.item())
+            if confidence < DETECTION_CONFIDENCE_THRESHOLD:
+                continue
+
             label = str(result.names[class_id]).strip().lower()
             if label in YOLO_VEHICLE_LABELS:
                 vehicle_count += 1
@@ -422,15 +584,104 @@ class ModelProcessor:
 
         return vehicle_count, person_count
 
+    def _predict_model(self, model_key: str, source: object) -> list[object]:
+        model = self.ensure_model(model_key)
+        if model_key == "yolov8m":
+            return model.predict(source=source, classes=YOLO_COCO_CLASS_IDS, verbose=False)
+        return model.predict(source=source, verbose=False)
+
+    def _annotation_label_font(self):
+        if ImageFont is None:
+            return None
+
+        try:
+            return ImageFont.truetype("Arial.ttf", ANNOTATION_FONT_SIZE)
+        except OSError:
+            try:
+                return ImageFont.load_default(size=ANNOTATION_FONT_SIZE)
+            except TypeError:
+                return ImageFont.load_default()
+
+    def _draw_annotation(
+        self,
+        draw: ImageDraw.ImageDraw,
+        box_coordinates: tuple[int, int, int, int],
+        label: str,
+        color: str,
+        label_font: object,
+    ) -> None:
+        x1, y1, x2, y2 = box_coordinates
+        draw.rectangle((x1, y1, x2, y2), outline=color, width=ANNOTATION_BOX_WIDTH)
+        text_bbox = draw.textbbox((x1, y1), label, font=label_font)
+        text_width = text_bbox[2] - text_bbox[0]
+        text_height = text_bbox[3] - text_bbox[1]
+        box_height = text_height + (ANNOTATION_LABEL_PADDING_Y * 2)
+        text_top = max(0, y1 - box_height)
+        draw.rectangle(
+            (
+                x1,
+                text_top,
+                x1 + text_width + (ANNOTATION_LABEL_PADDING_X * 2),
+                text_top + box_height,
+            ),
+            fill=color,
+        )
+        draw.text(
+            (x1 + ANNOTATION_LABEL_PADDING_X, text_top + ANNOTATION_LABEL_PADDING_Y),
+            label,
+            fill="black",
+            font=label_font,
+        )
+
+    def _draw_model_result(self, image_path: Path, result: object, output_path: Path, model_key: str) -> None:
+        if Image is None or ImageDraw is None:
+            result.save(filename=str(output_path))
+            return
+
+        source_image = Image.open(image_path).convert("RGB")
+        annotated_image = source_image.copy()
+        draw = ImageDraw.Draw(annotated_image)
+        label_font = self._annotation_label_font()
+        boxes = getattr(result, "boxes", None)
+        if boxes is None:
+            annotated_image.save(output_path)
+            return
+
+        for box in boxes:
+            x1, y1, x2, y2 = [int(value) for value in box.xyxy[0].tolist()]
+            if x2 <= x1 or y2 <= y1:
+                continue
+
+            class_id = int(box.cls.item())
+            confidence = float(box.conf.item())
+            if confidence < DETECTION_CONFIDENCE_THRESHOLD:
+                continue
+
+            label_name = str(result.names[class_id])
+            normalized_label = label_name.strip().lower()
+            if model_key == "yolov8m" and normalized_label not in YOLO_FILTER_LABELS:
+                continue
+
+            color = "lime" if model_key == "yolov8m" else "cyan"
+            self._draw_annotation(
+                draw,
+                (x1, y1, x2, y2),
+                f"{label_name} {confidence:.2f}",
+                color,
+                label_font,
+            )
+
+        annotated_image.save(output_path)
+
     def _draw_combined_pipeline(self, image_path: Path, output_path: Path) -> ProcessedImageResult:
         if Image is None or ImageDraw is None:
             raise RuntimeError("Pillow is required to build the combined model preview.")
 
-        yolov8m_model = self.ensure_model("yolov8m")
-        result = yolov8m_model.predict(source=str(image_path), verbose=False)[0]
+        result = self._predict_model("yolov8m", str(image_path))[0]
         source_image = Image.open(image_path).convert("RGB")
         annotated_image = source_image.copy()
         draw = ImageDraw.Draw(annotated_image)
+        label_font = self._annotation_label_font()
 
         if getattr(result, "boxes", None) is None:
             annotated_image.save(output_path)
@@ -446,10 +697,15 @@ class ModelProcessor:
 
             class_id = int(box.cls.item())
             confidence = float(box.conf.item())
+            if confidence < DETECTION_CONFIDENCE_THRESHOLD:
+                continue
+
             base_label = result.names[class_id]
             label = f"{base_label} {confidence:.2f}"
             color = "lime"
             normalized_label = str(base_label).strip().lower()
+            if normalized_label not in YOLO_FILTER_LABELS:
+                continue
 
             if normalized_label in YOLO_VEHICLE_LABELS:
                 vehicle_count += 1
@@ -464,13 +720,7 @@ class ModelProcessor:
                     label = f"{refined_label} {refined_confidence:.2f}"
                     color = "cyan"
 
-            draw.rectangle((x1, y1, x2, y2), outline=color, width=3)
-            text_bbox = draw.textbbox((x1, y1), label)
-            text_bottom = text_bbox[3]
-            text_right = text_bbox[2]
-            text_top = max(0, y1 - (text_bottom - text_bbox[1]) - 6)
-            draw.rectangle((x1, text_top, text_right + 8, text_top + (text_bottom - text_bbox[1]) + 6), fill=color)
-            draw.text((x1 + 4, text_top + 3), label, fill="black")
+            self._draw_annotation(draw, (x1, y1, x2, y2), label, color, label_font)
 
         annotated_image.save(output_path)
         return ProcessedImageResult(output_path, vehicle_count, person_count)
@@ -484,7 +734,7 @@ class ModelProcessor:
             shutil.copy2(image_path, output_path)
             return ProcessedImageResult(output_path)
 
-        if pipeline_name == "YOLOv8m + Vehicle v4":
+        if pipeline_name == "YOLOv8m + Vehicle v1":
             return self._draw_combined_pipeline(image_path, output_path)
 
         vehicle_count = 0
@@ -494,13 +744,12 @@ class ModelProcessor:
             temp_dir = Path(temp_dir_name)
 
             for index, model_key in enumerate(pipeline):
-                model = self.ensure_model(model_key)
-                results = model.predict(source=str(current_source), verbose=False)
+                results = self._predict_model(model_key, str(current_source))
                 result = results[0]
                 vehicle_count, person_count = self._count_result_detections(result, model_key)
 
                 stage_output = output_path if index == len(pipeline) - 1 else temp_dir / f"stage_{index}_{image_path.name}"
-                result.save(filename=str(stage_output))
+                self._draw_model_result(current_source, result, stage_output, model_key)
                 current_source = stage_output
 
             return ProcessedImageResult(output_path, vehicle_count, person_count)
