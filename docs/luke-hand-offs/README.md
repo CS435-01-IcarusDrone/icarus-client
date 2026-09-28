@@ -8,9 +8,9 @@ resume without re-discovering anything. New ones are written by the personal
 
 | Repo | Path on Luke's machine | Role |
 |---|---|---|
-| **SkyPilot** | `S:\GitHub\SkyPilot` (branch `ModelTraining`, remote `github.com/Elijahtab/SkyPilot`) | Vision model training, the two-stage pipeline, the ROS 2 workspace and the Jetson bring-up |
+| **SkyPilot** | `S:\GitHub\SkyPilot` (branch `ModelTraining`, remote `github.com/Elijahtab/SkyPilot`) | Vision model training and the two-stage pipeline. Supplies the v4 model; nothing else from it runs on the drone |
 | **icarus-client** | this repo | Desktop drone manager (Tkinter). Runs the models on captured images |
-| **icarus-pi** | `C:\Users\Administrator\Documents\CS433\PA_5\icarus-pi` | Raspberry Pi camera and Flask capture server |
+| **icarus-pi** | `C:\Users\Administrator\Documents\CS433\PA_5\icarus-pi` | Raspberry Pi camera and Flask capture server (Pixhawk-triggered). `jetson/` (branch `jetson-v4-detector`): the v4 ROS 2 detector for the Jetson Orin Nano |
 
 `models/v4_vehicle_model/vehicle_type_v4.pt` in this repo is byte-identical to
 SkyPilot's `Vehicle_type_detection/runs/Vehicle_type_detection_v4/weights/best.pt`.
@@ -24,7 +24,9 @@ is relative to `S:\GitHub\SkyPilot`, not to this repo. The exception is a
 reference to another hand-off (`docs/luke-hand-offs/...`), which resolves here.
 Their history before the move is in SkyPilot's git log.
 
-Newer hand-offs say which repo each path belongs to.
+Newer hand-offs say which repo each path belongs to. SkyPilot's `ros2_ws/`,
+`docker/` and `.devcontainer/`, which the 2026-09-22 hand-off describes, were
+removed on 2026-09-28. The Jetson work now lives in icarus-pi's `jetson/` folder.
 
 ## Index
 
