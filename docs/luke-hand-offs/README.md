@@ -38,3 +38,4 @@ removed on 2026-09-28. The Jetson work now lives in icarus-pi's `jetson/` folder
 | 2026-09-10 | [stopping-point](2026-09-10-stopping-point.md) | v8 reproduced; review pipeline restored |
 | 2026-09-15 | [kaggle-train-split-assessment](2026-09-15-kaggle-train-split-assessment.md) | Should the Kaggle train split go into v8? Options A, B and C |
 | 2026-09-22 | [jazzy-migration-jetson-bringup](2026-09-22-jazzy-migration-jetson-bringup.md) | ROS 2 Jazzy migration; Orin Nano on JetPack 7.2; v4 node |
+| 2026-09-29 | [jetson-v4-node-live-and-icarus-accuracy](2026-09-29-jetson-v4-node-live-and-icarus-accuracy.md) | v4 live as a ROS 2 node on the Jetson (icarus-pi `jetson/`), SSH deploy; hand labels and first Icarus accuracy (recall 0.62, precision 0.58; 960 px / conf 0.35 recommended) |
